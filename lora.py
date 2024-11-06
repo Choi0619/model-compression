@@ -3,6 +3,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 from datasets import load_dataset
 from peft import get_peft_model, LoraConfig, TaskType
 import wandb
+import torch.nn.functional as F
 
 # WandB 설정 초기화
 wandb.init(project="lora_rank_experiment")
@@ -12,17 +13,13 @@ model_name = "facebook/opt-350m"
 model = AutoModelForCausalLM.from_pretrained(model_name)
 tokenizer = AutoTokenizer.from_pretrained(model_name)
 
-# 데이터셋 로드
+# 데이터셋 로드 및 토큰화
 dataset = load_dataset("lucasmccabe-lmi/CodeAlpaca-20k")
-
-# 열 이름 확인
-print("Dataset columns:", dataset["train"].column_names)
-
-# 데이터셋의 적절한 열 이름으로 수정 (예시로 'instruction' 사용)
 def tokenize_function(examples):
     return tokenizer(examples["instruction"], padding="max_length", truncation=True, max_length=128)
 
 tokenized_datasets = dataset.map(tokenize_function, batched=True)
+tokenized_datasets = tokenized_datasets.rename_column("output", "labels")  # output을 labels로 변경
 train_dataset = tokenized_datasets["train"]
 
 # LoRA 적용할 모듈 설정
@@ -34,6 +31,20 @@ for name, module in model.named_modules():
 if "lm_head" in target_modules:  # 필요시 lm_head 제거
     target_modules.remove("lm_head")
 target_modules = list(target_modules)
+
+# 커스텀 Trainer 정의
+class CustomTrainer(Trainer):
+    def compute_loss(self, model, inputs, return_outputs=False):
+        outputs = model(**inputs)
+        logits = outputs.get("logits")
+        
+        # 레이블을 가져와서 손실 계산
+        labels = inputs.get("labels")
+        if labels is None:
+            raise ValueError("labels key is missing in inputs")
+        
+        loss = F.cross_entropy(logits.view(-1, logits.size(-1)), labels.view(-1))
+        return (loss, outputs) if return_outputs else loss
 
 # 각 lora_r 값에 대해 실험
 for lora_r in [8, 128, 256]:
@@ -51,8 +62,7 @@ for lora_r in [8, 128, 256]:
     # LoRA 모델 적용
     lora_model = get_peft_model(model, lora_config)
 
-    # Trainer 설정 (Hugging Face Trainer 사용)
-    from transformers import Trainer, TrainingArguments
+    # TrainingArguments 설정
     training_args = TrainingArguments(
         output_dir=f"/tmp/clm-instruction-tuning/rank_{lora_r}",
         per_device_train_batch_size=8,
@@ -61,7 +71,8 @@ for lora_r in [8, 128, 256]:
         report_to="wandb"  # wandb에 로그 기록
     )
 
-    trainer = Trainer(
+    # CustomTrainer 사용
+    trainer = CustomTrainer(
         model=lora_model,
         args=training_args,
         train_dataset=train_dataset,
