@@ -11,7 +11,7 @@ import os
 # 데이터셋 로드 및 분할
 dataset = load_dataset("lucasmccabe-lmi/CodeAlpaca-20k", split="train")
 dataset = dataset.train_test_split(test_size=0.1, seed=42)
-train_dataset = dataset['train'].select(range(len(dataset['train']) // 20))  # 학습 데이터의 5% 사용
+train_dataset = dataset['train'].select(range(len(dataset['train']) // 2))  # 학습 데이터의 50% 사용
 
 # 모델과 토크나이저 로드
 model = AutoModelForCausalLM.from_pretrained(
@@ -97,7 +97,7 @@ for lora_r in [8, 128, 256]:
             fp16=True,
             logging_steps=10,
             learning_rate=5e-4,
-            num_train_epochs=2,
+            num_train_epochs=1,
             warmup_ratio=0.1,
             lr_scheduler_type="cosine",
             max_grad_norm=1.0,
