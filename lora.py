@@ -12,10 +12,15 @@ model_name = "facebook/opt-350m"
 model = AutoModelForCausalLM.from_pretrained(model_name)
 tokenizer = AutoTokenizer.from_pretrained(model_name)
 
-# 데이터셋 로드 및 토큰화
+# 데이터셋 로드
 dataset = load_dataset("lucasmccabe-lmi/CodeAlpaca-20k")
+
+# 열 이름 확인
+print("Dataset columns:", dataset["train"].column_names)
+
+# 데이터셋의 적절한 열 이름으로 수정 (예시로 'instruction' 사용)
 def tokenize_function(examples):
-    return tokenizer(examples["text"], padding="max_length", truncation=True, max_length=128)
+    return tokenizer(examples["instruction"], padding="max_length", truncation=True, max_length=128)
 
 tokenized_datasets = dataset.map(tokenize_function, batched=True)
 train_dataset = tokenized_datasets["train"]
