@@ -1,9 +1,9 @@
-import time
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from datasets import load_dataset
 from trl import SFTConfig, SFTTrainer, DataCollatorForCompletionOnlyLM
 import wandb
 import torch
+import time
 from peft import get_peft_model, LoraConfig, TaskType
 
 # 모델 및 토크나이저 설정
@@ -79,16 +79,12 @@ for lora_r in [8, 128, 256]:
     # 학습 시작
     trainer.train()
     
-    # 학습 종료 시간 기록
+    # 학습 종료 시간 기록 및 계산
     end_time = time.time()
-
-    # 학습 소요 시간 계산 및 기록
     epoch_runtime = end_time - start_time
-    wandb.log({"runtime_per_epoch": epoch_runtime, "lora_rank": lora_r})
 
-    # WandB에 손실, 메모리 점유율 기록
+    # WandB에 손실, 메모리 점유율, runtime 기록
     max_memory_alloc = round(torch.cuda.max_memory_allocated(0) / 1024**3, 1)
-    print(f"Max Allocated Memory for LoRA rank {lora_r}: {max_memory_alloc} GB")
     for log in trainer.state.log_history:
         if "loss" in log:
             wandb.log({
@@ -97,7 +93,11 @@ for lora_r in [8, 128, 256]:
                 "rank": lora_r,
                 "max_memory_allocated": max_memory_alloc,
                 "train/grad_norm": log.get("grad_norm", None),
-                "learning_rate": log.get("learning_rate", None)
+                "learning_rate": log.get("learning_rate", None),
+                "runtime_per_epoch": epoch_runtime
             })
 
+    # 학습 중 출력 줄이기
+    print(f"Rank {lora_r} - Max Allocated Memory: {max_memory_alloc} GB - Runtime: {epoch_runtime:.2f}s")
+    
     wandb.finish()
