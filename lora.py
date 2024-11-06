@@ -26,15 +26,15 @@ if "lm_head" in target_modules:  # 필요한 경우 'lm_head' 제거
 
 target_modules = list(target_modules)
 
-# 학습용 데이터 포맷팅 함수 정의
+# 학습용 데이터 포맷팅 함수 정의 (경고 제거를 위한 수정)
 def formatting_prompts_func(example):
     output_texts = []
     for i in range(len(example["instruction"])):
         text = f"### Question: {example['instruction'][i]}\n### Answer: {example['output'][i]}"
-        output_texts.append(text)
+        output_texts.append({"input": text, "output": example['output'][i]})
     return output_texts
 
-response_template = " ### Answer:"
+response_template = "### Answer:"
 collator = DataCollatorForCompletionOnlyLM(response_template, tokenizer=tokenizer)
 
 # LoRA rank 설정에 따른 학습 진행
@@ -97,7 +97,7 @@ for lora_r in [8, 128, 256]:
                 "runtime_per_epoch": epoch_runtime
             })
 
-    # 학습 중 출력 줄이기
+    # 최종 메모리 사용량과 학습 시간 출력
     print(f"Rank {lora_r} - Max Allocated Memory: {max_memory_alloc} GB - Runtime: {epoch_runtime:.2f}s")
     
     wandb.finish()
