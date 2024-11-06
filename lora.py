@@ -14,7 +14,22 @@ tokenizer = AutoTokenizer.from_pretrained(model_name)
 # 데이터셋 로드 및 전처리
 dataset = load_dataset("lucasmccabe-lmi/CodeAlpaca-20k", split="train[:5%]")
 
-# LoRA를 적용할 모듈을 지정하는 코드
+# 텍스트 데이터 포맷을 문자열로 변환하는 함수 정의
+def preprocess_data(example):
+    # 데이터셋의 'instruction'와 'output' 열을 텍스트 형태로 병합
+    text = f"### Question: {example['instruction']}\n### Answer: {example['output']}"
+    return {"text": text}
+
+# 데이터셋에 전처리 적용
+dataset = dataset.map(preprocess_data)
+
+# 데이터 콜레이터 설정
+collator = DataCollatorForCompletionOnlyLM(
+    tokenizer=tokenizer,
+    response_template="### Answer:"
+)
+
+# LoRA 설정을 위한 대상 모듈 선택
 target_modules = set()
 for name, module in model.named_modules():
     if isinstance(module, torch.nn.Linear):
@@ -25,17 +40,6 @@ if "lm_head" in target_modules:  # 필요한 경우 'lm_head' 제거
     target_modules.remove("lm_head")
 
 target_modules = list(target_modules)
-
-# 학습용 데이터 포맷팅 함수 정의 (경고 제거를 위한 수정)
-def formatting_prompts_func(example):
-    output_texts = []
-    for i in range(len(example["instruction"])):
-        text = f"### Question: {example['instruction'][i]}\n### Answer: {example['output'][i]}"
-        output_texts.append({"input": text, "output": example['output'][i]})
-    return output_texts
-
-response_template = "### Answer:"
-collator = DataCollatorForCompletionOnlyLM(response_template, tokenizer=tokenizer)
 
 # LoRA rank 설정에 따른 학습 진행
 for lora_r in [8, 128, 256]:
@@ -69,7 +73,6 @@ for lora_r in [8, 128, 256]:
         model=lora_model,
         train_dataset=dataset,
         args=sft_config,
-        formatting_func=formatting_prompts_func,
         data_collator=collator,
     )
 
