@@ -34,7 +34,6 @@ def formatting_prompts_func(example):
         output_texts.append(text)
     return output_texts
 
-# 응답 템플릿 설정
 response_template = " ### Answer:"
 collator = DataCollatorForCompletionOnlyLM(response_template, tokenizer=tokenizer)
 
@@ -48,13 +47,11 @@ if "lm_head" in target_modules:
     target_modules.remove("lm_head")
 target_modules = list(target_modules)
 
-# 다양한 LoRA 랭크에 대해 학습을 진행
 for lora_r in [8, 128, 256]:
     torch.cuda.empty_cache()
     if torch.cuda.is_available():
         torch.cuda.reset_peak_memory_stats()
     
-    # Weights and Biases 설정
     wandb.init(
         project="Hanghae99",
         name=f"rank_{lora_r}",
@@ -70,7 +67,6 @@ for lora_r in [8, 128, 256]:
         }
     )
 
-    # LoRA 설정 적용
     peft_config = LoraConfig(
         task_type=TaskType.CAUSAL_LM,
         inference_mode=False,
@@ -89,13 +85,31 @@ for lora_r in [8, 128, 256]:
         "initial_gpu_memory_gb": initial_gpu_memory
     })
 
-    # 학습 시작 시간
-    start_time = time.time()
-    
-    # 학습 진행
-    train_result = trainer.train()
+    trainer = SFTTrainer(
+        model=model,
+        train_dataset=train_dataset,
+        args=SFTConfig(
+            output_dir=f"/tmp/lora_rank_{lora_r}",
+            run_name=f"lora_rank_{lora_r}",  # Set a unique run name
+            max_seq_length=128,
+            per_device_train_batch_size=8,
+            gradient_accumulation_steps=2,
+            fp16=True,
+            logging_steps=10,
+            learning_rate=5e-4,
+            num_train_epochs=2,
+            warmup_ratio=0.1,
+            lr_scheduler_type="cosine",
+            max_grad_norm=1.0,
+            save_strategy="epoch",
+        ),
+        formatting_func=formatting_prompts_func,
+        data_collator=collator,
+    )
 
-    # 학습 종료 시간
+
+    start_time = time.time()
+    train_result = trainer.train()
     end_time = time.time()
     
     # 평균 메모리 사용량 계산
@@ -105,7 +119,6 @@ for lora_r in [8, 128, 256]:
     avg_gpu_memory = (initial_gpu_memory + final_gpu_memory) / 2
     runtime = end_time - start_time
     
-    # 학습 결과 로그 저장
     wandb.log({
         "avg_cpu_memory_gb": avg_cpu_memory,
         "avg_gpu_memory_gb": avg_gpu_memory,
@@ -114,7 +127,6 @@ for lora_r in [8, 128, 256]:
         "final_train_loss": train_result.training_loss,
     })
 
-    # 학습 결과 출력
     print(f"\nResults for LoRA rank {lora_r}:")
     print(f"Training Loss: {train_result.training_loss:.4f}")
     print(f"Runtime: {runtime/60:.2f} minutes")
@@ -122,5 +134,4 @@ for lora_r in [8, 128, 256]:
     print(f"Average GPU Memory Usage: {avg_gpu_memory:.2f} GB")
     print("-" * 50)
 
-    # Weights and Biases 마무리
     wandb.finish()
