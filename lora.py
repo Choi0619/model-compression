@@ -9,7 +9,7 @@ import psutil
 import os
 
 # Increase dataset size to 20%
-dataset = load_dataset("lucasmccabe-lmi/CodeAlpaca-20k", split="train[:20%]")
+dataset = load_dataset("lucasmccabe-lmi/CodeAlpaca-20k", split="train[:5%]")
 model = AutoModelForCausalLM.from_pretrained(
     "facebook/opt-350m", 
     torch_dtype=torch.float16,
@@ -95,7 +95,7 @@ for lora_r in [8, 128, 256]:
             fp16=True,
             logging_steps=10,               # Increased logging frequency
             learning_rate=5e-4,            # Increased learning rate
-            num_train_epochs=5,            # Increased epochs
+            num_train_epochs=3,            # Increased epochs
             warmup_ratio=0.1,              # Increased warmup
             lr_scheduler_type="cosine",
             max_grad_norm=1.0,             # Added gradient clipping
