@@ -15,11 +15,22 @@ tokenizer = AutoTokenizer.from_pretrained(model_name)
 
 # 데이터셋 로드 및 토큰화
 dataset = load_dataset("lucasmccabe-lmi/CodeAlpaca-20k")
-def tokenize_function(examples):
-    return tokenizer(examples["instruction"], padding="max_length", truncation=True, max_length=128)
 
+def tokenize_function(examples):
+    # 'instruction'과 'output' 열을 사용하여 입력 시퀀스를 생성하고, 라벨을 'labels'에 설정
+    inputs = tokenizer(
+        examples["instruction"], padding="max_length", truncation=True, max_length=128
+    )
+    labels = tokenizer(
+        examples["output"], padding="max_length", truncation=True, max_length=128
+    )
+
+    # 'labels' 필드를 추가하여 모델이 loss를 계산할 수 있도록 합니다.
+    inputs["labels"] = labels["input_ids"]
+    return inputs
+
+# 토큰화된 데이터셋을 생성합니다.
 tokenized_datasets = dataset.map(tokenize_function, batched=True)
-tokenized_datasets = tokenized_datasets.rename_column("output", "labels")  # output을 labels로 변경
 train_dataset = tokenized_datasets["train"]
 
 # LoRA 적용할 모듈 설정
@@ -35,6 +46,7 @@ target_modules = list(target_modules)
 # 커스텀 Trainer 정의
 class CustomTrainer(Trainer):
     def compute_loss(self, model, inputs, return_outputs=False):
+        # 모델 출력과 라벨을 받아서 손실을 계산
         outputs = model(**inputs)
         logits = outputs.get("logits")
         
