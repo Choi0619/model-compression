@@ -3,47 +3,45 @@ from datasets import load_dataset
 from trl import SFTConfig, SFTTrainer, DataCollatorForCompletionOnlyLM
 import wandb
 import torch
-from peft import get_peft_model, LoraConfig, TaskType
+from peft import get_peft_config, get_peft_model, LoraConfig, TaskType
+import time
 
-# LoRA 설정 변수
-lora_r: int = 8
 lora_dropout: float = 0.1
 lora_alpha: int = 32
 
-# 모델 및 토크나이저 설정
-model_name = "facebook/opt-350m"
-model = AutoModelForCausalLM.from_pretrained(model_name, torch_dtype=torch.float16)
-tokenizer = AutoTokenizer.from_pretrained(model_name)
-
-# 데이터셋 로드
 dataset = load_dataset("lucasmccabe-lmi/CodeAlpaca-20k", split="train[:17%]")
+model = AutoModelForCausalLM.from_pretrained(
+    "facebook/opt-350m", torch_dtype=torch.float16
+)
+tokenizer = AutoTokenizer.from_pretrained("facebook/opt-350m")
 
-# LoRA를 적용할 모듈 선택
 target_modules = set()
+
 for name, module in model.named_modules():
     if isinstance(module, torch.nn.Linear):
         names = name.split(".")
         target_modules.add(names[0] if len(names) == 1 else names[-1])
 
-if "lm_head" in target_modules:
+if "lm_head" in target_modules:  # needed for 16-bit
     target_modules.remove("lm_head")
 
 target_modules = list(target_modules)
 
-# 학습용 데이터 포맷팅 함수 정의
 def formatting_prompts_func(example):
-    return f"### Question: {example['instruction']}\n### Answer: {example['output']}"
+    output_texts = []
+    for i in range(len(example["instruction"])):
+        text = f"### Question: {example['instruction'][i]}\n ### Answer: {example['output'][i]}"
+        output_texts.append(text)
+    return output_texts
 
 response_template = " ### Answer:"
 collator = DataCollatorForCompletionOnlyLM(response_template, tokenizer=tokenizer)
 
-# LoRA rank 설정에 따른 학습 진행
 for lora_r in [8, 128, 256]:
     torch.cuda.empty_cache()
     wandb.init(project="Hanghae99", name=f"rank {lora_r}", group="lora")
 
-    # LoRA 설정
-    lora_config = LoraConfig(
+    peft_config = LoraConfig(
         task_type=TaskType.CAUSAL_LM,
         inference_mode=False,
         r=lora_r,
@@ -51,32 +49,34 @@ for lora_r in [8, 128, 256]:
         lora_dropout=lora_dropout,
         target_modules=target_modules,
     )
-    lora_model = get_peft_model(model, lora_config)
+    model = get_peft_model(model, peft_config)
 
-    # SFTConfig 설정
-    sft_config = SFTConfig(
-        output_dir=f"/tmp/clm-instruction-tuning/rank_{lora_r}",
-        max_seq_length=128,
-        per_device_train_batch_size=16,
-        fp16=True,
-        logging_steps=1,
-        remove_unused_columns=False  # 불필요한 컬럼 제거 옵션 비활성화
-    )
+    print("Max Alloc Before Training:", round(torch.cuda.max_memory_allocated(0) / 1024**3, 1), "GB")
 
     trainer = SFTTrainer(
-        model=lora_model,
+        model,
         train_dataset=dataset,
-        args=sft_config,
+        args=SFTConfig(
+            output_dir="/tmp/clm-instruction-tuning",
+            max_seq_length=128,
+            per_device_train_batch_size=16,
+            fp16=True,
+            logging_steps=1,
+            learning_rate=2e-5,
+            num_train_epochs=3,
+            warmup_ratio=0.03,
+            lr_scheduler_type="cosine",
+        ),
         formatting_func=formatting_prompts_func,
         data_collator=collator,
     )
 
-    # 학습 시작
+    start_time = time.time()
     trainer.train()
+    end_time = time.time()
 
-    # 학습 종료 후 메모리 사용량 출력
-    max_memory_alloc = round(torch.cuda.max_memory_allocated(0) / 1024**3, 1)
-    print(f"Rank {lora_r} - Max Allocated Memory: {max_memory_alloc} GB")
+    print("Max Alloc After Training:", round(torch.cuda.max_memory_allocated(0) / 1024**3, 1), "GB")
+    print(f"Training time for rank {lora_r}: {end_time - start_time:.2f} seconds")
 
-    # WandB 종료
+    wandb.log({"runtime": end_time - start_time})
     wandb.finish()
