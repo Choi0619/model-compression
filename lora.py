@@ -8,8 +8,12 @@ import time
 import psutil
 import os
 
-# Increase dataset size to 20%
-dataset = load_dataset("lucasmccabe-lmi/CodeAlpaca-20k", split="train[:5%]")
+# Load and split the dataset
+dataset = load_dataset("lucasmccabe-lmi/CodeAlpaca-20k", split="train")
+dataset = dataset.train_test_split(test_size=0.1, seed=42)
+train_dataset = dataset['train'].select(range(len(dataset['train']) // 5))  # Use 20% of the training data
+eval_dataset = dataset['test'].select(range(len(dataset['test']) // 5))  # Use 20% of the test data for evaluation
+
 model = AutoModelForCausalLM.from_pretrained(
     "facebook/opt-350m", 
     torch_dtype=torch.float16,
@@ -18,7 +22,6 @@ model = AutoModelForCausalLM.from_pretrained(
 tokenizer = AutoTokenizer.from_pretrained("facebook/opt-350m")
 
 def get_memory_usage():
-    """Get current memory usage of the process"""
     process = psutil.Process(os.getpid())
     return process.memory_info().rss / 1024 / 1024 / 1024  # Convert to GB
 
@@ -43,12 +46,10 @@ if "lm_head" in target_modules:
 target_modules = list(target_modules)
 
 for lora_r in [8, 128, 256]:
-    # Clear CUDA cache and reset model
     torch.cuda.empty_cache()
     if torch.cuda.is_available():
         torch.cuda.reset_peak_memory_stats()
     
-    # Initialize wandb with more detailed config
     wandb.init(
         project="Hanghae99",
         name=f"rank_{lora_r}",
@@ -64,7 +65,6 @@ for lora_r in [8, 128, 256]:
         }
     )
 
-    # Configure LoRA
     peft_config = LoraConfig(
         task_type=TaskType.CAUSAL_LM,
         inference_mode=False,
@@ -75,7 +75,6 @@ for lora_r in [8, 128, 256]:
     )
     model = get_peft_model(model, peft_config)
 
-    # Log initial memory usage
     initial_memory = get_memory_usage()
     initial_gpu_memory = torch.cuda.max_memory_allocated() / 1024**3 if torch.cuda.is_available() else 0
     wandb.log({
@@ -83,22 +82,24 @@ for lora_r in [8, 128, 256]:
         "initial_gpu_memory_gb": initial_gpu_memory
     })
 
-    # Configure trainer with improved parameters
     trainer = SFTTrainer(
         model=model,
-        train_dataset=dataset,
+        train_dataset=train_dataset,
+        eval_dataset=eval_dataset,
         args=SFTConfig(
             output_dir=f"/tmp/lora_rank_{lora_r}",
+            run_name=f"lora_rank_{lora_r}",  # Set a unique run name
             max_seq_length=128,
-            per_device_train_batch_size=8,  # Reduced batch size
-            gradient_accumulation_steps=2,   # Added gradient accumulation
+            per_device_train_batch_size=8,
+            per_device_eval_batch_size=8,
+            gradient_accumulation_steps=2,
             fp16=True,
-            logging_steps=10,               # Increased logging frequency
-            learning_rate=5e-4,            # Increased learning rate
-            num_train_epochs=3,            # Increased epochs
-            warmup_ratio=0.1,              # Increased warmup
+            logging_steps=10,
+            learning_rate=5e-4,
+            num_train_epochs=5,
+            warmup_ratio=0.1,
             lr_scheduler_type="cosine",
-            max_grad_norm=1.0,             # Added gradient clipping
+            max_grad_norm=1.0,
             save_strategy="epoch",
             evaluation_strategy="epoch",
             load_best_model_at_end=True,
@@ -107,15 +108,15 @@ for lora_r in [8, 128, 256]:
         data_collator=collator,
     )
 
-    # Training with timing
     start_time = time.time()
     train_result = trainer.train()
     end_time = time.time()
     
-    # Log final metrics
     final_memory = get_memory_usage()
     final_gpu_memory = torch.cuda.max_memory_allocated() / 1024**3 if torch.cuda.is_available() else 0
     runtime = end_time - start_time
+    
+    eval_results = trainer.evaluate()
     
     wandb.log({
         "final_cpu_memory_gb": final_memory,
@@ -123,12 +124,15 @@ for lora_r in [8, 128, 256]:
         "peak_gpu_memory_gb": torch.cuda.max_memory_allocated() / 1024**3 if torch.cuda.is_available() else 0,
         "runtime_seconds": runtime,
         "runtime_minutes": runtime / 60,
-        "final_loss": train_result.training_loss,
+        "final_train_loss": train_result.training_loss,
+        "eval_loss": eval_results["eval_loss"],
+        "eval_perplexity": eval_results.get("eval_perplexity", None),
     })
 
-    # Print detailed metrics
     print(f"\nResults for LoRA rank {lora_r}:")
     print(f"Training Loss: {train_result.training_loss:.4f}")
+    print(f"Evaluation Loss: {eval_results['eval_loss']:.4f}")
+    print(f"Evaluation Perplexity: {eval_results.get('eval_perplexity', 'N/A')}")
     print(f"Runtime: {runtime/60:.2f} minutes")
     print(f"CPU Memory Usage: {final_memory:.2f} GB")
     print(f"GPU Memory Usage: {final_gpu_memory:.2f} GB")
