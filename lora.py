@@ -15,13 +15,12 @@ tokenizer = AutoTokenizer.from_pretrained(model_name)
 dataset = load_dataset("lucasmccabe-lmi/CodeAlpaca-20k", split="train[:5%]")
 
 # 텍스트 데이터 포맷을 문자열로 변환하는 함수 정의
-def preprocess_data(example):
-    # 데이터셋의 'instruction'와 'output' 열을 텍스트 형태로 병합
+def formatting_prompts_func(example):
     text = f"### Question: {example['instruction']}\n### Answer: {example['output']}"
     return {"text": text}
 
 # 데이터셋에 전처리 적용
-dataset = dataset.map(preprocess_data)
+dataset = dataset.map(formatting_prompts_func)
 
 # 데이터 콜레이터 설정
 collator = DataCollatorForCompletionOnlyLM(
@@ -67,6 +66,7 @@ for lora_r in [8, 128, 256]:
         learning_rate=5e-5,  # 초기 learning rate 설정
         lr_scheduler_type="cosine",  # 자동 learning rate 조정 스케줄러
         fp16=True,
+        dataset_kwargs={'skip_prepare_dataset': True}  # 데이터셋 준비 과정 건너뛰기
     )
 
     trainer = SFTTrainer(
