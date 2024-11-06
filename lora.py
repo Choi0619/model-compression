@@ -98,11 +98,11 @@ for lora_r in [8, 128, 256]:
             lr_scheduler_type="cosine",
             max_grad_norm=1.0,
             save_strategy="epoch",
-            load_best_model_at_end=True,
         ),
         formatting_func=formatting_prompts_func,
         data_collator=collator,
     )
+
 
     start_time = time.time()
     train_result = trainer.train()
