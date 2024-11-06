@@ -9,7 +9,7 @@ import time
 lora_dropout: float = 0.1
 lora_alpha: int = 32
 
-dataset = load_dataset("lucasmccabe-lmi/CodeAlpaca-20k", split="train[:17%]")
+dataset = load_dataset("lucasmccabe-lmi/CodeAlpaca-20k", split="train[:5%]")
 model = AutoModelForCausalLM.from_pretrained(
     "facebook/opt-350m", torch_dtype=torch.float16
 )
