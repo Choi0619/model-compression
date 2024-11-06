@@ -1,8 +1,7 @@
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from datasets import load_dataset
-from peft import get_peft_model, LoraConfig
-from some_module import SFTTrainer, SFTConfig
+from peft import get_peft_model, LoraConfig, TaskType
 import wandb
 
 # WandB 설정 초기화
@@ -34,38 +33,40 @@ target_modules = list(target_modules)
 # 각 lora_r 값에 대해 실험
 for lora_r in [8, 128, 256]:
     print(f"\nStarting training with LoRA rank: {lora_r}")
+    
     # LoRA 설정 구성
     lora_config = LoraConfig(
         r=lora_r,
         lora_alpha=32,
         lora_dropout=0.1,
-        task_type="CAUSAL_LM",  # Casual Language Modeling
+        task_type=TaskType.CAUSAL_LM,  # Causal Language Modeling
         target_modules=target_modules
     )
 
     # LoRA 모델 적용
     lora_model = get_peft_model(model, lora_config)
 
-    # SFTConfig 설정
-    sft_config = SFTConfig(
+    # Trainer 설정 (Hugging Face Trainer 사용)
+    from transformers import Trainer, TrainingArguments
+    training_args = TrainingArguments(
         output_dir=f"/tmp/clm-instruction-tuning/rank_{lora_r}",
-        max_seq_length=128  # 필수 설정
+        per_device_train_batch_size=8,
+        num_train_epochs=1,
+        logging_steps=10,
+        report_to="wandb"  # wandb에 로그 기록
     )
 
-    # Trainer 설정
-    trainer = SFTTrainer(
+    trainer = Trainer(
         model=lora_model,
+        args=training_args,
         train_dataset=train_dataset,
-        args=sft_config,
-        formatting_func=None,
-        data_collator=None
+        tokenizer=tokenizer
     )
 
     # 학습 시작 및 손실 로깅
     trainer.train()
-    wandb.log({"train/loss": trainer.state.log_history[-1]["loss"]})
 
-    # 메모리 사용량 출력
+    # 학습 종료 후 메모리 사용량 출력
     max_memory_alloc = round(torch.cuda.max_memory_allocated(0) / 1024**3, 1)
     print(f"Max Allocated Memory for LoRA rank {lora_r}: {max_memory_alloc} GB")
     wandb.log({"lora_rank": lora_r, "max_memory_allocated": max_memory_alloc})
