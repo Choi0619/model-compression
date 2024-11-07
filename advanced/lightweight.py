@@ -36,14 +36,25 @@ tokenizer = AutoTokenizer.from_pretrained("EleutherAI/gpt-neo-1.3B")
 if tokenizer.pad_token is None:
     tokenizer.pad_token = tokenizer.eos_token
 
-# Configure LoRA with compatible target modules
+# Dynamically Identify `torch.nn.Linear` layers for LoRA
+target_modules = set()
+for name, module in model.named_modules():
+    if isinstance(module, torch.nn.Linear):
+        names = name.split('.')
+        target_modules.add(names[0] if len(names) == 1 else names[-1])
+
+# Remove unsupported layers if present in LoRA config
+target_modules.discard("lm_head")
+target_modules = list(target_modules)
+
+# LoRA configuration
 lora_config = LoraConfig(
     task_type=TaskType.CAUSAL_LM,
     inference_mode=False,
     r=8,
     lora_alpha=32,
     lora_dropout=0.1,
-    target_modules=["mlp.dense_h_to_4h", "mlp.dense_4h_to_h"]  # target modules for gpt-neo-1.3B
+    target_modules=target_modules
 )
 model = get_peft_model(model, lora_config)
 
