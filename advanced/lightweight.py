@@ -9,7 +9,7 @@ import torch
 from peft import get_peft_config, get_peft_model, LoraConfig, TaskType
 
 # WandB Initialization
-wandb.init(project="therapist-chatbot", name="gpt-neo-1.3B-quantized-lora-training")
+wandb.init(project="therapist-chatbot", name="gpt-neo-1.3B-quantized-lora-checkpointed")
 
 # Load corpus.json data
 with open('corpus.json', 'r', encoding='utf-8') as f:
@@ -27,14 +27,17 @@ for i in range(0, len(corpus)-1, 2):
 train_data = data_pairs
 train_dataset = Dataset.from_pandas(pd.DataFrame(train_data))
 
-# Load model and tokenizer with quantization
-bnb_config = BitsAndBytesConfig(load_in_8bit=True)
+# Load model and tokenizer with 4-bit quantization
+bnb_config = BitsAndBytesConfig(load_in_4bit=True)
 model = AutoModelForCausalLM.from_pretrained("EleutherAI/gpt-neo-1.3B", quantization_config=bnb_config, device_map="auto")
 tokenizer = AutoTokenizer.from_pretrained("EleutherAI/gpt-neo-1.3B")
 
 # Set pad_token if missing
 if tokenizer.pad_token is None:
     tokenizer.pad_token = tokenizer.eos_token
+
+# Enable Gradient Checkpointing to reduce memory usage
+model.gradient_checkpointing_enable()
 
 # Dynamically Identify `torch.nn.Linear` layers for LoRA
 target_modules = set()
@@ -70,25 +73,27 @@ def preprocess_function(examples):
 train_dataset = train_dataset.map(preprocess_function, batched=True)
 collator = DataCollatorWithPadding(tokenizer=tokenizer)
 
-# Training configuration
+# Training configuration with smaller batch size
 training_args = TrainingArguments(
     output_dir="./results",
     logging_strategy="steps",
     logging_steps=10,
-    per_device_train_batch_size=8,
+    per_device_train_batch_size=2,  # Reduced batch size for lower memory usage
+    gradient_accumulation_steps=4,  # Accumulates gradients to simulate larger batch sizes
     num_train_epochs=10,
     save_total_limit=1,
     fp16=False,
     report_to="wandb"
 )
 
-# Custom Trainer
+# Custom Trainer with memory tracking
 class CustomTrainer(Trainer):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.gpu_memory_usage_list = []
 
     def compute_loss(self, model, inputs, return_outputs=False):
+        # Runtime and memory tracking
         start_time = time.time()
         process = psutil.Process()
         memory_usage = process.memory_info().rss / (1024 ** 2)
@@ -99,9 +104,9 @@ class CustomTrainer(Trainer):
         outputs = model(**inputs)
         loss = outputs.loss if hasattr(outputs, "loss") else outputs[0]
         
+        # Logging runtime and memory usage
         end_time = time.time()
         runtime = end_time - start_time
-        
         wandb.log({
             "train/loss": loss.item(),
             "train/runtime": runtime,
@@ -117,7 +122,7 @@ class CustomTrainer(Trainer):
             wandb.log({"train/average_gpu_memory_usage_MB": avg_gpu_memory_usage})
             print(f"Average GPU Memory Usage: {avg_gpu_memory_usage:.2f} MB")
 
-# Training process
+# Measure total training time
 overall_start_time = time.time()
 trainer = CustomTrainer(
     model=model,
@@ -132,6 +137,7 @@ total_training_time = (overall_end_time - overall_start_time) / 60
 wandb.log({"train/total_training_time_min": total_training_time})
 print(f"Total Training Time: {total_training_time:.2f} minutes")
 
+# Log average GPU memory usage
 trainer.log_average_gpu_memory_usage()
 trainer.save_model("./fine_tuned_therapist_chatbot")
 
