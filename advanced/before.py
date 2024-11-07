@@ -24,12 +24,11 @@ for i in range(0, len(corpus)-1, 2):  # user와 therapist 쌍으로 진행
         output_text = corpus[i + 1]['content']  # 치료사 응답
         data_pairs.append({"input": input_text, "output": output_text})
 
-# 학습 및 검증 세트로 분할 (80-20 비율)
-train_data, val_data = train_test_split(data_pairs, test_size=0.2, random_state=42)
+# 전체 데이터를 학습 세트로 사용
+train_data = data_pairs
 
 # Hugging Face 데이터셋으로 변환
 train_dataset = Dataset.from_pandas(pd.DataFrame(train_data))
-val_dataset = Dataset.from_pandas(pd.DataFrame(val_data))
 
 # 모델과 토크나이저 로드
 model = AutoModelForCausalLM.from_pretrained("facebook/opt-350m")
@@ -48,7 +47,6 @@ def preprocess_function(examples):
 
 # 전처리 적용
 train_dataset = train_dataset.map(preprocess_function, batched=True)
-val_dataset = val_dataset.map(preprocess_function, batched=True)
 
 # DataCollatorWithPadding 사용
 collator = DataCollatorWithPadding(tokenizer=tokenizer)
@@ -56,12 +54,9 @@ collator = DataCollatorWithPadding(tokenizer=tokenizer)
 # 학습 설정
 training_args = TrainingArguments(
     output_dir="./results",
-    evaluation_strategy="epoch",
     logging_strategy="steps",
     logging_steps=10,
-    eval_steps=10,
     per_device_train_batch_size=8,
-    per_device_eval_batch_size=8,
     num_train_epochs=10,
     save_total_limit=1,
     fp16=False,
@@ -89,6 +84,7 @@ class CustomTrainer(Trainer):
         
         # WandB에 로그 기록
         wandb.log({
+            "train/loss": loss.item(),
             "train/runtime": runtime,
             "train/memory_usage_MB": memory_usage,
             "train/gpu_memory_usage_MB": gpu_memory_usage,
@@ -96,22 +92,26 @@ class CustomTrainer(Trainer):
         
         return (loss, outputs) if return_outputs else loss
 
+# 전체 훈련 시간 측정 시작
+overall_start_time = time.time()
+
 trainer = CustomTrainer(
     model=model,
     args=training_args,
     train_dataset=train_dataset,
-    eval_dataset=val_dataset,
     data_collator=collator,
 )
 
 # 학습 시작
 train_result = trainer.train()
 
-# 평가 데이터셋으로 평가 실행
-eval_metrics = trainer.evaluate()
+# 전체 훈련 시간 계산 및 로그 기록
+overall_end_time = time.time()
+total_training_time = (overall_end_time - overall_start_time) / 60  # 분 단위 변환
+wandb.log({"train/total_training_time_min": total_training_time})
 
-# WandB에 평가 결과 로깅
-wandb.log({"eval/loss": eval_metrics.get('eval_loss', 0), "eval/epoch": eval_metrics.get('epoch', 0)})
+# 전체 훈련 시간 콘솔 출력
+print(f"Total Training Time: {total_training_time:.2f} minutes")
 
 # 모델 저장
 trainer.save_model("./fine_tuned_therapist_chatbot")
