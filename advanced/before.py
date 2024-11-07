@@ -8,7 +8,7 @@ import psutil
 import torch
 
 # WandB 초기화
-wandb.init(project="therapist-chatbot", name="original-training")
+wandb.init(project="therapist-chatbot", name="gemma-2B-training")
 
 # corpus.json 데이터 로드
 with open('corpus.json', 'r', encoding='utf-8') as f:
@@ -28,9 +28,9 @@ train_data = data_pairs
 # Hugging Face 데이터셋으로 변환
 train_dataset = Dataset.from_pandas(pd.DataFrame(train_data))
 
-# 모델과 토크나이저 로드
-model = AutoModelForCausalLM.from_pretrained("facebook/opt-350m")
-tokenizer = AutoTokenizer.from_pretrained("facebook/opt-350m")
+# 모델과 토크나이저 로드 (gemma-2B 모델로 변경)
+model = AutoModelForCausalLM.from_pretrained("gemma-2B")
+tokenizer = AutoTokenizer.from_pretrained("gemma-2B")
 
 # 전처리 함수 정의
 def preprocess_function(examples):
