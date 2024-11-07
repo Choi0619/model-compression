@@ -1,4 +1,5 @@
 import json
+import os
 import pandas as pd
 from sklearn.model_selection import train_test_split
 from datasets import Dataset
@@ -6,6 +7,11 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, DataCollatorWithPa
 from trl import SFTConfig, SFTTrainer
 import wandb
 from transformers import TrainerCallback
+from dotenv import load_dotenv  # .env 파일을 불러오기 위한 라이브러리
+
+# .env 파일에서 API 키 불러오기
+load_dotenv()  # .env 파일 로드
+hf_token = os.getenv("HF_TOKEN")  # .env 파일에 있는 HF_TOKEN 값 가져오기
 
 # WandB 초기화
 wandb.init(project="therapist-chatbot", name="fine-tuning")
@@ -29,9 +35,9 @@ train_data, val_data = train_test_split(data_pairs, test_size=0.2, random_state=
 train_dataset = Dataset.from_pandas(pd.DataFrame(train_data))
 val_dataset = Dataset.from_pandas(pd.DataFrame(val_data))
 
-# 모델과 토크나이저 로드
-model = AutoModelForCausalLM.from_pretrained("facebook/opt-350m")
-tokenizer = AutoTokenizer.from_pretrained("facebook/opt-350m")
+# 모델과 토크나이저 로드 (API 키 사용)
+model = AutoModelForCausalLM.from_pretrained("gemma-2b", use_auth_token=hf_token)
+tokenizer = AutoTokenizer.from_pretrained("gemma-2b", use_auth_token=hf_token)
 
 # 전처리 함수 정의
 def preprocess_function(examples):
