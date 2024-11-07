@@ -1,9 +1,7 @@
 import json
 import pandas as pd
-from sklearn.model_selection import train_test_split
 from datasets import Dataset
-from transformers import AutoModelForCausalLM, AutoTokenizer, DataCollatorWithPadding
-from transformers import Trainer, TrainingArguments
+from transformers import AutoModelForCausalLM, AutoTokenizer, DataCollatorWithPadding, Trainer, TrainingArguments
 import wandb
 import time
 import psutil
@@ -65,6 +63,10 @@ training_args = TrainingArguments(
 
 # 트레이너 초기화
 class CustomTrainer(Trainer):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.gpu_memory_usage_list = []
+
     def compute_loss(self, model, inputs, return_outputs=False):
         # Runtime 측정 시작
         start_time = time.time()
@@ -73,6 +75,10 @@ class CustomTrainer(Trainer):
         process = psutil.Process()
         memory_usage = process.memory_info().rss / (1024 ** 2)  # 메모리 사용량(MB 단위)
         gpu_memory_usage = torch.cuda.memory_allocated() / (1024 ** 2) if torch.cuda.is_available() else 0
+        
+        # GPU 메모리 사용량을 리스트에 추가
+        if torch.cuda.is_available():
+            self.gpu_memory_usage_list.append(gpu_memory_usage)
         
         # 손실 계산 및 outputs 가져오기
         outputs = model(**inputs)
@@ -91,6 +97,13 @@ class CustomTrainer(Trainer):
         })
         
         return (loss, outputs) if return_outputs else loss
+
+    def log_average_gpu_memory_usage(self):
+        # GPU 메모리 사용량의 평균을 계산하고 WandB에 로그 기록
+        if self.gpu_memory_usage_list:
+            avg_gpu_memory_usage = sum(self.gpu_memory_usage_list) / len(self.gpu_memory_usage_list)
+            wandb.log({"train/average_gpu_memory_usage_MB": avg_gpu_memory_usage})
+            print(f"Average GPU Memory Usage: {avg_gpu_memory_usage:.2f} MB")
 
 # 전체 훈련 시간 측정 시작
 overall_start_time = time.time()
@@ -112,6 +125,9 @@ wandb.log({"train/total_training_time_min": total_training_time})
 
 # 전체 훈련 시간 콘솔 출력
 print(f"Total Training Time: {total_training_time:.2f} minutes")
+
+# 평균 GPU 메모리 사용량 로그 기록
+trainer.log_average_gpu_memory_usage()
 
 # 모델 저장
 trainer.save_model("./fine_tuned_therapist_chatbot")
