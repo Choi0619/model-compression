@@ -1,7 +1,7 @@
 import json
 import pandas as pd
 from datasets import Dataset
-from transformers import AutoModelForCausalLM, AutoTokenizer, DataCollatorWithPadding, Trainer, TrainingArguments
+from transformers import AutoModelForCausalLM, AutoTokenizer, DataCollatorWithPadding, Trainer, TrainingArguments, BitsAndBytesConfig
 import wandb
 import time
 import psutil
@@ -30,21 +30,26 @@ train_data = data_pairs
 train_dataset = Dataset.from_pandas(pd.DataFrame(train_data))
 
 # 모델과 토크나이저 로드
-model = AutoModelForCausalLM.from_pretrained("EleutherAI/gpt-neo-1.3B", load_in_8bit=True, device_map="auto")
+bnb_config = BitsAndBytesConfig(load_in_8bit=True)
+model = AutoModelForCausalLM.from_pretrained("EleutherAI/gpt-neo-1.3B", quantization_config=bnb_config, device_map="auto")
 tokenizer = AutoTokenizer.from_pretrained("EleutherAI/gpt-neo-1.3B")
 
 # pad_token 설정
 if tokenizer.pad_token is None:
     tokenizer.pad_token = tokenizer.eos_token
 
-# LoRA 설정
+# 모델의 모듈 탐색 (모듈 이름 확인)
+for name, module in model.named_modules():
+    print(name)
+
+# LoRA 적용 가능한 모듈로 설정
 lora_config = LoraConfig(
     task_type=TaskType.CAUSAL_LM,
     inference_mode=False,
     r=8,  # rank
     lora_alpha=32,
     lora_dropout=0.1,
-    target_modules=["query", "value"]  # 대상 모듈
+    target_modules=["mlp.dense_h_to_4h", "mlp.dense_4h_to_h"]  # gpt-neo-1.3B의 적합한 모듈 예시
 )
 
 # LoRA 적용
