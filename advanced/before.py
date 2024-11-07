@@ -3,6 +3,7 @@ import pandas as pd
 from sklearn.model_selection import train_test_split
 import wandb
 import openai
+import os
 from dotenv import load_dotenv
 
 # 환경 변수 로드 (API 키를 .env 파일에서 불러옴)
