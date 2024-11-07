@@ -8,7 +8,7 @@ import psutil
 import torch
 
 # WandB 초기화
-wandb.init(project="therapist-chatbot", name="original-training")
+wandb.init(project="therapist-chatbot", name="gpt-neo-1.3B-training")
 
 # corpus.json 데이터 로드
 with open('corpus.json', 'r', encoding='utf-8') as f:
@@ -31,6 +31,10 @@ train_dataset = Dataset.from_pandas(pd.DataFrame(train_data))
 # 모델과 토크나이저 로드
 model = AutoModelForCausalLM.from_pretrained("EleutherAI/gpt-neo-1.3B")
 tokenizer = AutoTokenizer.from_pretrained("EleutherAI/gpt-neo-1.3B")
+
+# pad_token 설정
+if tokenizer.pad_token is None:
+    tokenizer.pad_token = tokenizer.eos_token
 
 # 전처리 함수 정의
 def preprocess_function(examples):
