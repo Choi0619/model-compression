@@ -5,6 +5,9 @@ from datasets import Dataset
 from transformers import AutoModelForCausalLM, AutoTokenizer, DataCollatorWithPadding
 from transformers import Trainer, TrainingArguments
 import wandb
+import time
+import psutil
+import torch
 
 # WandB 초기화
 wandb.init(project="therapist-chatbot", name="original-training")
@@ -66,7 +69,33 @@ training_args = TrainingArguments(
 )
 
 # 트레이너 초기화
-trainer = Trainer(
+class CustomTrainer(Trainer):
+    def compute_loss(self, model, inputs, return_outputs=False):
+        # Runtime 측정 시작
+        start_time = time.time()
+
+        # 메모리 및 GPU 사용량 측정
+        process = psutil.Process()
+        memory_usage = process.memory_info().rss / (1024 ** 2)  # 메모리 사용량(MB 단위)
+        gpu_memory_usage = torch.cuda.memory_allocated() / (1024 ** 2) if torch.cuda.is_available() else 0
+        
+        # 손실 계산
+        loss = super().compute_loss(model, inputs, return_outputs)
+        
+        # Runtime 측정 종료
+        end_time = time.time()
+        runtime = end_time - start_time
+        
+        # WandB에 로그 기록
+        wandb.log({
+            "train/runtime": runtime,
+            "train/memory_usage_MB": memory_usage,
+            "train/gpu_memory_usage_MB": gpu_memory_usage,
+        })
+        
+        return (loss, outputs) if return_outputs else loss
+
+trainer = CustomTrainer(
     model=model,
     args=training_args,
     train_dataset=train_dataset,
