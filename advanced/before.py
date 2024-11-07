@@ -33,15 +33,15 @@ train_data, val_data = train_test_split(data_pairs, test_size=0.2, random_state=
 
 # 모델 호출 함수 정의 (최신 openai API에 맞춰 수정)
 def generate_response(input_text, model="gpt-3.5-turbo"):
-    response = openai.Completion.create(
-        engine=model,
-        prompt=input_text,
+    response = openai.ChatCompletion.create(
+        model=model,
+        messages=[
+            {"role": "user", "content": input_text}
+        ],
         max_tokens=150,
-        n=1,
-        stop=None,
         temperature=0.7,
     )
-    return response.choices[0].text.strip()
+    return response.choices[0].message['content']
 
 # WandB에 학습 손실, runtime 및 메모리 사용률을 로깅하는 함수
 def log_training_progress(train_data, model="gpt-3.5-turbo"):
