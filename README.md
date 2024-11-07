@@ -2,7 +2,8 @@
 model compression project
 
 https://api.wandb.ai/links/wrtyu0603-illinois-institute-of-technology/630d7aty
-![image](https://github.com/user-attachments/assets/a4a107f2-5d26-4c08-a83a-846801cc82af)
+![image](https://github.com/user-attachments/assets/cce3bb3a-5557-4fe6-b8a2-752e440490b6)
+
 
 
 https://api.wandb.ai/links/wrtyu0603-illinois-institute-of-technology/1ocbxayx
