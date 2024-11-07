@@ -36,7 +36,8 @@ tokenizer = AutoTokenizer.from_pretrained("EleutherAI/gpt-neo-1.3B")
 if tokenizer.pad_token is None:
     tokenizer.pad_token = tokenizer.eos_token
 
-# Enable Gradient Checkpointing to reduce memory usage
+# Disable `use_cache` for gradient checkpointing
+model.config.use_cache = False
 model.gradient_checkpointing_enable()
 
 # Dynamically Identify `torch.nn.Linear` layers for LoRA
@@ -60,6 +61,10 @@ lora_config = LoraConfig(
     target_modules=target_modules
 )
 model = get_peft_model(model, lora_config)
+
+# Ensure all parameters require gradients
+for param in model.parameters():
+    param.requires_grad = True
 
 # Preprocessing function
 def preprocess_function(examples):
