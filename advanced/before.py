@@ -1,17 +1,10 @@
 import json
 import pandas as pd
 from sklearn.model_selection import train_test_split
+from datasets import Dataset
+from transformers import AutoModelForCausalLM, AutoTokenizer, DataCollatorWithPadding
+from transformers import Trainer, TrainingArguments
 import wandb
-import openai
-import os
-import time
-import psutil
-from dotenv import load_dotenv
-
-# 환경 변수 로드 (API 키를 .env 파일에서 불러옴)
-load_dotenv()
-api_key = os.getenv("OPENAI_API_KEY")
-openai.api_key = api_key
 
 # WandB 초기화
 wandb.init(project="therapist-chatbot", name="original-training")
@@ -31,103 +24,71 @@ for i in range(0, len(corpus)-1, 2):  # user와 therapist 쌍으로 진행
 # 학습 및 검증 세트로 분할 (80-20 비율)
 train_data, val_data = train_test_split(data_pairs, test_size=0.2, random_state=42)
 
-# 모델 호출 함수 정의 (최신 openai API에 맞춰 수정)
-def generate_response(input_text, model="gpt-3.5-turbo"):
-    response = openai.ChatCompletion.create(
-        model=model,
-        messages=[
-            {"role": "user", "content": input_text}
-        ],
-        max_tokens=150,
-        temperature=0.7,
-    )
-    return response.choices[0].message['content']
+# Hugging Face 데이터셋으로 변환
+train_dataset = Dataset.from_pandas(pd.DataFrame(train_data))
+val_dataset = Dataset.from_pandas(pd.DataFrame(val_data))
 
-# WandB에 학습 손실, runtime 및 메모리 사용률을 로깅하는 함수
-def log_training_progress(train_data, model="gpt-3.5-turbo"):
-    total_loss = 0
-    process = psutil.Process(os.getpid())  # 현재 프로세스 정보
+# 모델과 토크나이저 로드
+model = AutoModelForCausalLM.from_pretrained("facebook/opt-350m")
+tokenizer = AutoTokenizer.from_pretrained("facebook/opt-350m")
 
-    for i, pair in enumerate(train_data):
-        input_text = pair["input"]
-        expected_output = pair["output"]
+# 전처리 함수 정의
+def preprocess_function(examples):
+    inputs = tokenizer(examples['input'], max_length=256, truncation=True, padding="max_length")
+    labels = tokenizer(text_target=examples['output'], max_length=256, truncation=True, padding="max_length").input_ids
+    
+    # <pad> 토큰을 -100으로 설정하여 손실 계산에서 제외
+    labels = [[(label if label != tokenizer.pad_token_id else -100) for label in label_list] for label_list in labels]
+    
+    inputs["labels"] = labels
+    return inputs
 
-        # Runtime 측정 시작
-        start_time = time.time()
+# 전처리 적용
+train_dataset = train_dataset.map(preprocess_function, batched=True)
+val_dataset = val_dataset.map(preprocess_function, batched=True)
 
-        # 모델로부터 응답 생성
-        model_response = generate_response(input_text, model=model)
+# DataCollatorWithPadding 사용
+collator = DataCollatorWithPadding(tokenizer=tokenizer)
 
-        # Runtime 측정 종료
-        end_time = time.time()
-        runtime = end_time - start_time
+# 학습 설정
+training_args = TrainingArguments(
+    output_dir="./results",
+    evaluation_strategy="epoch",
+    logging_strategy="steps",
+    logging_steps=10,
+    eval_steps=10,
+    per_device_train_batch_size=8,
+    per_device_eval_batch_size=8,
+    num_train_epochs=10,
+    save_total_limit=1,
+    fp16=False,
+    report_to="wandb",  # WandB에 로그 기록
+)
 
-        # 메모리 사용량 측정
-        memory_usage = process.memory_info().rss / (1024 * 1024)  # 메모리 사용량 (MB 단위)
-
-        # 예측과 실제의 차이 계산 (여기서는 간단히 문자열 유사도를 평가 지표로 사용)
-        loss = len(set(expected_output) ^ set(model_response)) / len(set(expected_output + model_response))
-        total_loss += loss
-
-        # 10번째 데이터마다 WandB에 손실, runtime 및 메모리 로그 기록
-        if (i + 1) % 10 == 0:
-            avg_loss = total_loss / (i + 1)
-            wandb.log({
-                "train/loss": avg_loss,
-                "train/runtime": runtime,
-                "train/memory_usage_MB": memory_usage,
-            })
-            print(f"Step {i + 1}, Loss: {avg_loss}, Runtime: {runtime:.2f}s, Memory Usage: {memory_usage:.2f}MB")
-
-    avg_total_loss = total_loss / len(train_data)
-    print(f"Total Average Loss: {avg_total_loss}")
-    wandb.log({"train/total_avg_loss": avg_total_loss})
-
-# 평가 함수 정의
-def evaluate(val_data, model="gpt-3.5-turbo"):
-    total_loss = 0
-    process = psutil.Process(os.getpid())  # 현재 프로세스 정보
-
-    for i, pair in enumerate(val_data):
-        input_text = pair["input"]
-        expected_output = pair["output"]
-
-        # Runtime 측정 시작
-        start_time = time.time()
-
-        # 모델로부터 응답 생성
-        model_response = generate_response(input_text, model=model)
-
-        # Runtime 측정 종료
-        end_time = time.time()
-        runtime = end_time - start_time
-
-        # 메모리 사용량 측정
-        memory_usage = process.memory_info().rss / (1024 * 1024)  # 메모리 사용량 (MB 단위)
-
-        # 손실 계산
-        loss = len(set(expected_output) ^ set(model_response)) / len(set(expected_output + model_response))
-        total_loss += loss
-
-        # 평가 로그 기록
-        if (i + 1) % 10 == 0:
-            avg_val_loss = total_loss / (i + 1)
-            wandb.log({
-                "eval/loss": avg_val_loss,
-                "eval/runtime": runtime,
-                "eval/memory_usage_MB": memory_usage,
-            })
-            print(f"Eval Step {i + 1}, Loss: {avg_val_loss}, Runtime: {runtime:.2f}s, Memory Usage: {memory_usage:.2f}MB")
-
-    avg_val_loss = total_loss / len(val_data)
-    print(f"Validation Loss: {avg_val_loss}")
-    wandb.log({"eval/total_avg_loss": avg_val_loss})
+# 트레이너 초기화
+trainer = Trainer(
+    model=model,
+    args=training_args,
+    train_dataset=train_dataset,
+    eval_dataset=val_dataset,
+    data_collator=collator,
+)
 
 # 학습 시작
-log_training_progress(train_data, model="gpt-3.5-turbo")
+train_result = trainer.train()
 
-# 평가 시작
-evaluate(val_data, model="gpt-3.5-turbo")
+# 평가 데이터셋으로 평가 실행
+eval_metrics = trainer.evaluate()
+
+# WandB에 평가 결과 로깅
+wandb.log({"eval/loss": eval_metrics.get('eval_loss', 0), "eval/epoch": eval_metrics.get('epoch', 0)})
+
+# 모델 저장
+trainer.save_model("./fine_tuned_therapist_chatbot")
+
+# 학습 중 로그 히스토리 확인
+df = pd.DataFrame(trainer.state.log_history)
+print(df)  # 로그 기록 출력 (손실 값이 기록되었는지 확인)
 
 # WandB 로깅 종료
 wandb.finish()
