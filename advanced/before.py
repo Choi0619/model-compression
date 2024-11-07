@@ -79,8 +79,9 @@ class CustomTrainer(Trainer):
         memory_usage = process.memory_info().rss / (1024 ** 2)  # 메모리 사용량(MB 단위)
         gpu_memory_usage = torch.cuda.memory_allocated() / (1024 ** 2) if torch.cuda.is_available() else 0
         
-        # 손실 계산
-        loss = super().compute_loss(model, inputs, return_outputs)
+        # 손실 계산 및 outputs 가져오기
+        outputs = model(**inputs)
+        loss = outputs.loss if hasattr(outputs, "loss") else outputs[0]
         
         # Runtime 측정 종료
         end_time = time.time()
