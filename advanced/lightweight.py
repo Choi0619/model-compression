@@ -62,9 +62,11 @@ lora_config = LoraConfig(
 )
 model = get_peft_model(model, lora_config)
 
-# Ensure all parameters require gradients
+# Ensure all floating-point parameters require gradients
 for param in model.parameters():
-    param.requires_grad = True
+    if param.dtype in [torch.float16, torch.float32, torch.float64, torch.bfloat16]:  # Only set for float types
+        param.requires_grad = True
+
 
 # Preprocessing function
 def preprocess_function(examples):
