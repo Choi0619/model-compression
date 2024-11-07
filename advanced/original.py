@@ -1,7 +1,6 @@
 import json
 import os
 import pandas as pd
-import time  # 런타임 측정을 위해 추가
 from sklearn.model_selection import train_test_split
 from datasets import Dataset
 from transformers import AutoModelForCausalLM, AutoTokenizer, DataCollatorWithPadding
@@ -15,7 +14,7 @@ load_dotenv()  # .env 파일 로드
 hf_token = os.getenv("HF_TOKEN")  # .env 파일에 있는 HF_TOKEN 값 가져오기
 
 # WandB 초기화
-wandb.init(project="therapist-chatbot", name="gyuhwan")
+wandb.init(project="therapist-chatbot", name="fine-tuning")
 
 # corpus.json 데이터 로드
 with open('corpus.json', 'r', encoding='utf-8') as f:
@@ -98,21 +97,13 @@ class WandbCallback(TrainerCallback):
 # WandB 콜백 추가
 trainer.add_callback(WandbCallback)
 
-# 학습 시작 - 학습 시간 측정 추가
-start_train_time = time.time()
+# 학습 시작
 train_result = trainer.train()
-end_train_time = time.time()
-train_duration = end_train_time - start_train_time
-wandb.log({"train_duration": train_duration})
 
-# 평가 데이터셋으로 평가 실행 - 평가 시간 측정 추가
-start_eval_time = time.time()
+# 평가 데이터셋으로 평가 실행
 eval_metrics = trainer.evaluate()
-end_eval_time = time.time()
-eval_duration = end_eval_time - start_eval_time
-wandb.log({"eval_duration": eval_duration})
 
-# 평가 결과와 평가 시간을 WandB에 기록
+# WandB에 eval 결과 로깅
 wandb.log({"eval/loss": eval_metrics.get('eval_loss', 0), "eval/epoch": eval_metrics.get('epoch', 0)})
 
 # 모델 저장
